@@ -34,7 +34,7 @@ public class SOAPSession {
 				LOGGER.info("SOAP Session service endpoint at " + webServicePort.toExternalForm());
 			}
 		} catch (ServiceException e) {
-			throw new RuntimeException("ServiceException during SOAPClient contruction", e);
+			throw new RuntimeException("ServiceException during SOAPClient construction", e);
 		}
 	}
 
@@ -43,7 +43,7 @@ public class SOAPSession {
 	}
 
 	public void connect(String userName, String password) throws RemoteException {
-		LOGGER.info("Connnecting via SOAP as : " + userName);
+		LOGGER.info("Connecting via SOAP as : " + userName);
 		token = getJiraSoapService().login(userName, password);
 		LOGGER.info("Connected");
 	}

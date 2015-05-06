@@ -1,5 +1,7 @@
 package info.bluefloyd.jenkins;
 
+import com.atlassian.jira.rpc.soap.client.RemoteCustomFieldValue;
+import com.atlassian.jira.rpc.soap.client.RemoteField;
 import hudson.Extension;
 import hudson.Launcher;
 import hudson.model.BuildListener;
@@ -8,17 +10,13 @@ import hudson.model.AbstractProject;
 import hudson.tasks.BuildStepDescriptor;
 import hudson.tasks.Builder;
 import hudson.util.FormValidation;
+import hudson.util.ListBoxModel;
 import info.bluefloyd.jenkins.SOAPClient;
 import info.bluefloyd.jenkins.SOAPSession;
 
 import java.io.IOException;
 import java.io.PrintStream;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
@@ -32,7 +30,6 @@ import org.kohsuke.stapler.StaplerRequest;
 
 import com.atlassian.jira.rpc.soap.client.RemoteIssue;
 import com.atlassian.jira.rpc.soap.client.RemoteVersion;
-import java.util.ArrayList;
 
 /**
  * <p>
@@ -57,6 +54,9 @@ public class IssueUpdatesBuilder extends Builder {
 	// Delimiter separates fixed versions
 	private static final String	DELIMITER	= ",";
 
+	static final String CUSTOM_FIELD_REPLACE = "REPLACE";
+	static final String CUSTOM_FIELD_APPEND = "APPEND";
+
 	private final String soapUrl;
 	private final String userName;
 	private final String password;
@@ -65,17 +65,18 @@ public class IssueUpdatesBuilder extends Builder {
 	private final String comment;
 	private final String customFieldId;
 	private final String customFieldValue;
+	private final String customFieldUpdateMode;
 	private String realJql;
 	private String realWorkflowActionName;
 	private String realComment;
 	private String realFieldValue;
-	
+
 	private boolean resettingFixedVersions;
 	private String fixedVersions;
 	private boolean failIfJqlFails;
 	private boolean failIfNoIssuesReturned;
 	transient List<String> fixedVersionNames;
-	
+
 	// Temporarily cache the version String-ID mapping for multiple
 	// projects, to avoid performance penalty may be caused by excessive
 	// getVersions() invocations.  
@@ -84,7 +85,7 @@ public class IssueUpdatesBuilder extends Builder {
 
 	@DataBoundConstructor
 	public IssueUpdatesBuilder(String soapUrl, String userName, String password, String jql, String workflowActionName,
-							   String comment, String customFieldId, String customFieldValue, boolean resettingFixedVersions,
+							   String comment, String customFieldId, String customFieldValue, String customFieldUpdateMode, boolean resettingFixedVersions,
 							   String fixedVersions, boolean failIfJqlFails, boolean failIfNoIssuesReturned) {
 		this.soapUrl = soapUrl;
 		this.userName = userName;
@@ -94,6 +95,7 @@ public class IssueUpdatesBuilder extends Builder {
 		this.comment = comment;
 		this.customFieldId = customFieldId;
 		this.customFieldValue = customFieldValue;
+		this.customFieldUpdateMode = customFieldUpdateMode;
 		this.resettingFixedVersions = resettingFixedVersions;
 		this.fixedVersions = fixedVersions;
 		this.failIfJqlFails = failIfJqlFails;
@@ -146,9 +148,9 @@ public class IssueUpdatesBuilder extends Builder {
 		return customFieldId;
 	}
 
-	public String getCustomFieldValue() {
-		return customFieldValue;
-	}
+	public String getCustomFieldValue() { return customFieldValue; }
+
+	public String getCustomFieldUpdateMode() { return customFieldUpdateMode; }
 
 	public String getFixedVersions()
 	{
@@ -217,7 +219,7 @@ public class IssueUpdatesBuilder extends Builder {
 
 		// reset the cache
 		projectVersionNameIdCache = new ConcurrentHashMap<String, Map<String,String>>();
-		
+
 		for (RemoteIssue issue : issues) {
 			listener.getLogger().println(issue.getKey() + "  \t" + issue.getSummary());
 			updateIssueStatus(client, session, issue, logger);
@@ -245,7 +247,7 @@ public class IssueUpdatesBuilder extends Builder {
 			expandedFixedVersions = substituteEnvVar( expandedFixedVersions, entry.getKey(), entry.getValue() );
 		}
 		// NOTE: did not trim
-		fixedVersionNames = Arrays.asList( expandedFixedVersions.trim().split( DELIMITER ) );
+		fixedVersionNames = expandedFixedVersions.trim().isEmpty() ? new ArrayList<String>(0) : Arrays.asList( expandedFixedVersions.trim().split( DELIMITER ) );
 	}
 	
 	String substituteEnvVar( String origin, String varName, String replacement ) {
@@ -315,7 +317,7 @@ public class IssueUpdatesBuilder extends Builder {
 		// getting the ids corresponding to the names
 		Collection<String> ids = new HashSet<String>();
 		for( String name : versionNames ){
-			if ( name != null )
+			if ( name != null && !name.trim().isEmpty() )
 			{
 				final String id = map.get( name.trim() );
 				if ( id == null ) {
@@ -353,12 +355,47 @@ public class IssueUpdatesBuilder extends Builder {
 	private void updateIssueField(SOAPClient client, SOAPSession session, RemoteIssue issue, PrintStream logger) {
 		boolean updateFieldSuccessful = false;
 		if ( customFieldId != null && !customFieldId.trim().isEmpty()) {
-			updateFieldSuccessful = client.updateIssueField(session, issue.getKey(), customFieldId, realFieldValue);
-			if (!updateFieldSuccessful) {
-				logger.println("Could not update field " + customFieldId + "for issue " + issue.getKey());
+			try {
+				ArrayList<String> customFieldValues;
+
+				if (!customFieldUpdateMode.equals(CUSTOM_FIELD_REPLACE)) {
+					customFieldValues = remoteCustomFieldValues(issue, customFieldId, logger);
+				} else {
+					customFieldValues = new ArrayList<String>();
+				}
+
+				customFieldValues.add(realFieldValue);
+
+				updateFieldSuccessful = client.updateIssueField(session, issue.getKey(), customFieldId, customFieldValues.toArray(new String[customFieldValues.size()]));
+				if (!updateFieldSuccessful) {
+					logger.println("Could not update field " + customFieldId + " for issue " + issue.getKey());
+				}
+			} catch ( Exception e ) {
+				logger.println("An error occurred while updating field " + customFieldId + " for issue " + issue.getKey() + "; error: "+ e.toString());
 			}
 		}
 	}
+
+	private ArrayList<String> remoteCustomFieldValues(RemoteIssue issue, String fieldId, PrintStream logger) {
+		String[] customFieldValues = new String[0];
+
+		try {
+			RemoteCustomFieldValue[] customFieldsAndValues = issue.getCustomFieldValues();
+
+			for (RemoteCustomFieldValue customFieldAndValues : customFieldsAndValues) {
+				if (customFieldAndValues.getCustomfieldId().equals(fieldId)) {
+					customFieldValues = customFieldAndValues.getValues();
+					break;
+				}
+			}
+		} catch (Exception e) {
+			logger.println("Unable to fetch values for field "+ fieldId +" of issue "+ issue.getKey() +"; error: "+ e.toString());
+		}
+
+		return new ArrayList<String>( Arrays.asList(customFieldValues) );
+	}
+
+	//private
 
 	@Override
 	public DescriptorImpl getDescriptor() {
@@ -375,6 +412,8 @@ public class IssueUpdatesBuilder extends Builder {
 	 */
 	@Extension
 	public static final class DescriptorImpl extends BuildStepDescriptor<Builder> {
+
+		transient List<RemoteField> jiraCustomFieldsCache;
 
 		/**
 		 * Performs on-the-fly validation of the form field 'soapUrl'.
@@ -449,6 +488,62 @@ public class IssueUpdatesBuilder extends Builder {
 						.warning("Is an issue status mentioned in the JQL? Using \"status=\" is recommended to select the issues by status.");
 			}
 			return FormValidation.ok();
+		}
+
+		/**
+		 * Returns the custom fields available in Jira instance
+		 *
+		 * @param soapUrl Jira instance URL
+		 * @param userName Jira instance username
+		 * @param password Jira instance password
+		 * @return ListBoxModel of Options for select form element
+		 * @throws IOException
+		 * @throws ServletException
+		 */
+		public ListBoxModel doFillCustomFieldIdItems(@QueryParameter("soapUrl") final String soapUrl,
+													 @QueryParameter("userName") final String userName,
+													 @QueryParameter("password") final String password) throws IOException, ServletException {
+			ListBoxModel m = new ListBoxModel();
+			m.add("", ""); // empty value as default
+			if ( soapUrl != null && !soapUrl.trim().isEmpty()
+					&& userName != null && !userName.trim().isEmpty()
+					&& password != null && !password.trim().isEmpty() ) {
+
+				List<RemoteField> remoteCustomFields = remoteCustomFields(soapUrl, userName, password);
+				if (remoteCustomFields != null && !remoteCustomFields.isEmpty()) {
+					for (RemoteField remoteField : remoteCustomFields) {
+						m.add(remoteField.getName(), remoteField.getId());
+					}
+				}
+			}
+			return m;
+		}
+
+		private List<RemoteField> remoteCustomFields(String soapUrl, String userName, String password) {
+			// lazy cache of remote custom fields
+			if (jiraCustomFieldsCache != null) return jiraCustomFieldsCache;
+
+			SOAPClient client = new SOAPClient();
+			SOAPSession session = client.connect(soapUrl, userName, password);
+
+			if ( session != null ) {
+				jiraCustomFieldsCache = client.getCustomFields(session);
+			}
+			return jiraCustomFieldsCache;
+		}
+
+		/**
+		 * Provides list of custom field update actions
+		 *
+		 * @return ListBoxModel of Options for select form element
+		 * @throws IOException
+		 * @throws ServletException
+		 */
+		public ListBoxModel doFillCustomFieldUpdateModeItems() throws IOException, ServletException {
+			ListBoxModel m = new ListBoxModel();
+			m.add(CUSTOM_FIELD_REPLACE);
+			m.add(CUSTOM_FIELD_APPEND);
+			return m;
 		}
 
 		public boolean isApplicable(Class<? extends AbstractProject> aClass) {

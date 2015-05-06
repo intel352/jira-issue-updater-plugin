@@ -8,17 +8,9 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
+import com.atlassian.jira.rpc.soap.client.*;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-
-import com.atlassian.jira.rpc.soap.client.JiraSoapService;
-import com.atlassian.jira.rpc.soap.client.RemoteAuthenticationException;
-import com.atlassian.jira.rpc.soap.client.RemoteComment;
-import com.atlassian.jira.rpc.soap.client.RemoteFieldValue;
-import com.atlassian.jira.rpc.soap.client.RemoteIssue;
-import com.atlassian.jira.rpc.soap.client.RemoteNamedObject;
-import com.atlassian.jira.rpc.soap.client.RemotePermissionException;
-import com.atlassian.jira.rpc.soap.client.RemoteVersion;
 
 /**
  * Simple client used to make calls to Jira via SOAP.
@@ -123,7 +115,7 @@ public class SOAPClient {
 		JiraSoapService jiraSoapService = session.getJiraSoapService();
 		RemoteComment comment = new RemoteComment();
 		comment.setBody(commentText);
-		String errorMessage = "Error adding  comment to issue: " + issueKey;
+		String errorMessage = "Error adding comment to issue: " + issueKey;
 		boolean commentAdded = false;
 		try {
 			jiraSoapService.addComment(token, issueKey, comment);
@@ -141,7 +133,7 @@ public class SOAPClient {
 	}
 	
 	/**
-	 * Returns all versions defined for specified peoject.
+	 * Returns all versions defined for specified project.
 	 * @param session
 	 * @param projectKey	project key
 	 * @return
@@ -165,6 +157,29 @@ public class SOAPClient {
 	}
 
 	/**
+	 * Returns all custom fields defined in Jira instance
+	 * @param session
+	 * @return
+	 */
+	public List<RemoteField> getCustomFields( SOAPSession session ) {
+		String token = session.getAuthenticationToken();
+		JiraSoapService soap = session.getJiraSoapService();
+
+		List<RemoteField> customFields = new ArrayList<RemoteField>();
+		try	{
+			RemoteField[] remoteCustomFields = soap.getCustomFields(token);
+			if ( remoteCustomFields != null ) {
+				for( RemoteField customField : remoteCustomFields ) {
+					customFields.add( customField );
+				}
+			}
+		} catch ( RemoteException e ) {
+			LOGGER.error( "Error getting list of custom fields for Jira instance.", e);
+		}
+		return customFields;
+	}
+
+	/**
 	 * Updates fixedVersions of the specified jira issue.
 	 * @param session
 	 * @param issue
@@ -174,7 +189,7 @@ public class SOAPClient {
 	 */
 	public boolean updateFixedVersions( SOAPSession session, final RemoteIssue issue, Collection<String> finalVersionIds )
 	{
-		return updateIssueField(session, issue.getKey(), "fixVersions", finalVersionIds.toArray( new String[]{} ));
+		return updateIssueField(session, issue.getKey(), "fixVersions", finalVersionIds.toArray( new String[finalVersionIds.size()] ));
 	}
 
 	public boolean updateIssueField(SOAPSession session, final String issueKey, String fieldId, String fieldValue)

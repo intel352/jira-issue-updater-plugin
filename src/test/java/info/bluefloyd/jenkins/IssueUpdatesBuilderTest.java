@@ -19,6 +19,7 @@ public class IssueUpdatesBuilderTest
 		String comment = "$CMT _$$CMT $SQL_var $ActionName $VERSION2";
 		String fieldId = "customfield_10862";
 		String fieldValue = "$SQL_var ver $VERSION2";
+		String fieldUpdateMode = IssueUpdatesBuilder.CUSTOM_FIELD_REPLACE;
 		String workflowActionName ="  $ActionName $ ActionName";
 		String fixedVersions = "v1,$VERSION2,$VERSIONS";
 		
@@ -29,7 +30,7 @@ public class IssueUpdatesBuilderTest
 		vars.put( "VERSION2", "v2" );
 		vars.put( "VERSIONS", "v3,v4,v5" );
 		
-		IssueUpdatesBuilder builder = new IssueUpdatesBuilder( "soapUrl", "userName", "password", jql, workflowActionName, comment, fieldId, fieldValue, true, fixedVersions, true, true );
+		IssueUpdatesBuilder builder = new IssueUpdatesBuilder( "soapUrl", "userName", "password", jql, workflowActionName, comment, fieldId, fieldValue, fieldUpdateMode, true, fixedVersions, true, true );
 		Assert.assertEquals( "var1 var1 $var1", builder.substituteEnvVar( "$VAR $VAR $$VAR", "VAR", "var1"  ) );
 
 		builder.substituteEnvVars( vars );

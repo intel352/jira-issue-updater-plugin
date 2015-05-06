@@ -29,14 +29,18 @@
     <f:textbox />
   </f:entry>
 
-  <f:entry title="Jira custom field to be edited" field="customFieldId">
-    <f:textbox />
+  <f:entry title="Jira custom field to be updated" field="customFieldId">
+    <f:select />
   </f:entry>
 
   <f:entry title="Jira custom field value" field="customFieldValue">
     <f:textbox />
   </f:entry>
-  
+
+  <f:entry title="Jira custom field update mode" field="customFieldUpdateMode">
+    <f:select />
+  </f:entry>
+
   <f:entry title="Remove existing fixed versions first" field="resettingFixedVersions">
     <f:checkbox />
   </f:entry>
